@@ -1,15 +1,15 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
 type Resolve<T> = dyn FnOnce(T);
 type Reject<E> = dyn FnOnce(E);
-type Executor<T, E> = dyn Fn(Box<Resolve<T>>, Box<Reject<E>>);
 
 struct InternalPromise<T, E> {
     result: Option<Result<T, E>>,
 }
 
 pub struct Promise<T, E> {
-    internal: RefCell<InternalPromise<T, E>>,
+    internal: Rc<RefCell<InternalPromise<T, E>>>,
 }
 
 
@@ -38,16 +38,22 @@ impl<T: 'static, E: 'static> Promise<T, E> {
     where
         F: FnOnce(Box<Resolve<T>>, Box<Reject<E>>)
     {
-        let internal = RefCell::new(InternalPromise::new());
+        let internal = Rc::new(RefCell::new(InternalPromise::new()));
+        let resolver = internal.clone();
+        let rejecter = internal.clone();
 
         executor(
-            Box::new(|value| internal.borrow_mut().resolve(Some(value))),
-            Box::new(|reason| internal.borrow_mut().reject(Some(reason))),
+            Box::new(move |value| resolver.borrow_mut().resolve(Some(value))),
+            Box::new(move |reason| rejecter.borrow_mut().reject(Some(reason))),
         );
 
         Self {
             internal,
         }
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.internal.borrow().is_done()
     }
 }
 
@@ -69,8 +75,8 @@ mod test {
             resolve(1);
         });
 
-        assert!(p.internal.result.is_some());
-        assert!(p.internal.result.unwrap().is_ok());
-        assert_eq!(p.internal.result.unwrap().unwrap(), 1);
+        assert!(p.internal.borrow().result.is_some());
+        assert!(p.internal.borrow().result.unwrap().is_ok());
+        assert_eq!(p.internal.borrow().result.unwrap().unwrap(), 1);
     }
 }
