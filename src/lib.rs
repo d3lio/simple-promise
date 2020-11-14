@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 type Resolve<T> = dyn FnOnce(T);
 type Reject<E> = dyn FnOnce(E);
 type Executor<T, E> = dyn Fn(Box<Resolve<T>>, Box<Reject<E>>);
@@ -7,7 +9,7 @@ struct InternalPromise<T, E> {
 }
 
 pub struct Promise<T, E> {
-    internal: InternalPromise<T, E>,
+    internal: RefCell<InternalPromise<T, E>>,
 }
 
 
@@ -36,9 +38,12 @@ impl<T: 'static, E: 'static> Promise<T, E> {
     where
         F: FnOnce(Box<Resolve<T>>, Box<Reject<E>>)
     {
-        let mut internal = InternalPromise::new();
+        let internal = RefCell::new(InternalPromise::new());
 
-        executor(Box::new(|value| internal.resolve(Some(value))), Box::new(|reason| internal.reject(Some(reason))));
+        executor(
+            Box::new(|value| internal.borrow_mut().resolve(Some(value))),
+            Box::new(|reason| internal.borrow_mut().reject(Some(reason))),
+        );
 
         Self {
             internal,
