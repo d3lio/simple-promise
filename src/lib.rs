@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-type Resolve<T> = dyn FnOnce(Option<T>);
-type Reject<E> = dyn FnOnce(Option<E>);
+type Resolve<T> = dyn FnOnce(Option<T>) + Send;
+type Reject<E> = dyn FnOnce(Option<E>) + Send;
 
 pub struct InternalPromise<T, E> {
     result: Option<Result<T, E>>,
@@ -12,7 +12,7 @@ pub struct Promise<T, E> {
 }
 
 
-impl<T: 'static, E: 'static> InternalPromise<T, E> {
+impl<T: 'static + Send, E: 'static + Send> InternalPromise<T, E> {
     fn new() -> Self {
         Self {
             result: None,
@@ -32,7 +32,7 @@ impl<T: 'static, E: 'static> InternalPromise<T, E> {
     }
 }
 
-impl<T: 'static, E: 'static> Promise<T, E> {
+impl<T: 'static + Send, E: 'static + Send> Promise<T, E> {
     pub fn new<F>(executor: F) -> Self
     where
         F: FnOnce(Box<Resolve<T>>, Box<Reject<E>>)
@@ -99,21 +99,25 @@ mod test {
             reject(Some("some error"));
         });
 
-        assert!(!p.internal.lock().unwrap().result.is_some());
-        assert!(p.internal.lock().unwrap().result.unwrap().is_err());
-        assert_eq!(p.internal.lock().unwrap().result.unwrap().err(), "some error");
+        assert_eq!(p.internal.lock().unwrap().result.unwrap(), Err("some error"));
     }
 
     #[test]
     fn thread() {
+        let mut handle = None;
         let p = Promise::<u32, u32>::new(|resolve, _| {
-            std::thread::spawn(move || {
+            handle = Some(std::thread::spawn(move || {
                 resolve(Some(1));
-            });
+            }));
         });
 
-        assert!(p.internal.lock().unwrap().result.is_some());
-        assert!(p.internal.lock().unwrap().result.unwrap().is_ok());
-        assert_eq!(p.internal.lock().unwrap().result.unwrap().unwrap(), 1);
+        // Flaky test
+        // std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        assert_eq!(p.internal.lock().unwrap().result, None);
+
+        handle.unwrap().join().unwrap();
+
+        assert_eq!(p.internal.lock().unwrap().result, Some(Ok(1)));
     }
 }
