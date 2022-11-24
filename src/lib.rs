@@ -62,7 +62,8 @@ mod test {
         let mut handle = None;
         let p = Promise::<u32>::new(|sender| {
             handle = Some(std::thread::spawn(move || {
-                let _ = sender.send(PromiseResult::Rejected(1));
+                sender.send(PromiseResult::Rejected(1))
+                    .expect("Channel send failed");
             }));
         });
 
